@@ -33,12 +33,10 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire2, OLED_RESET);
 
 
 // set up variables using the SD utility library functions:
-//Sd2Card card;
-//SdVolume volume;
-File root;
-File entry;
-File mapfile;
-File logfile;
+SdFs sd;
+FsFile root;
+FsFile entry;
+FsFile mapfile;
 
 // here is one continuous block of 16 bits
 // should be able to read like this
@@ -89,8 +87,9 @@ unsigned char busLookup[8];
 
 
 char RBLo,RBHi;
+
 #define BINLENGTH  224000L
-#define RAMSIZE  8192
+#define RAMSIZE    8192
 //EXTMEM unsigned int ROM[BINLENGTH];
 uint16_t ROM[BINLENGTH] DMAMEM;
 uint16_t RAM[RAMSIZE] DMAMEM;
@@ -112,18 +111,31 @@ int slot;
 
 // change this to match your SD shield or module;
 // Teensy 3.5 & 3.6 & 4.1 on-board: BUILTIN_SDCARD
-const int chipSelect = BUILTIN_SDCARD;
+// const int chipSelect = BUILTIN_SDCARD;
+// Try max SPI clock for an SD. Reduce SPI_CLOCK if errors occur.
+#define SPI_CLOCK SD_SCK_MHZ(50)
 
-uint32_t selectedfile_size;       // BIN file size
-char longfilename[46];        // long file name (trunked) 
-char mapfilename[46];          // map cfg file name
-int lenfilename; 
-char path[50];
+// Try to select the best SD card configuration.
+#if HAS_SDIO_CLASS
+#define SD_CONFIG SdioConfig(FIFO_SDIO)
+#elif  ENABLE_DEDICATED_SPI
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
+#else  // HAS_SDIO_CLASS
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SPI_CLOCK)
+#endif  // HAS_SDIO_CLASS
 
+
+uint32_t selectedfile_size;   // BIN file size
+char longfilename[256];        // long file name (trunked) 
+char mapfilename[256];         // map cfg file name
+#define ROOT_MAX_POS 1023
+int rootpos[ROOT_MAX_POS+1];
 
 void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr/   
 {
-  int i; 
+  int curid=0;
+  int lastid=0;
+  int lastpos=0;
  
   char suf[10];                 // extension file 
   uint64_t file_size;        // tailles des fichiers affiches
@@ -132,68 +144,44 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
   file_size = 0;
   bool selected = false;
   bool filefound = false;
-  int subfolder = 0;    // nexting subfolders counter
-  int dot = 0;
-      
-
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setTextColor(1);
-      display.setCursor(0, 1);
-      display.print("Reading card..");
-      display.display();
-      //delay(1000);
+ 
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(1);
+  display.setCursor(0, 1);
+  display.print("Reading card..");
+  display.display();
+  //delay(1000);
     
-    // Boucle de choix du fichier
-   path[0]=0;
-   root=SD.open("/");
-  
-  while (!selected)
+  // Boucle de choix du fichier
+  if (!(root=sd.open("/"))) {
+    Serial.println("Error opening Root");
+  }
+
+  //First explore the entire directory
+  curid  = 0;
+  lastid = -1;
+  do 
   {
-     while (!filefound) 
+    filefound = false;
+    while (!filefound) 
     {
       //read next file
+      lastpos=root.curPosition();
       entry=root.openNextFile();
-      
-      if(!entry)
-      {
-        if (subfolder>0) {
-          strcpy(longfilename,"..");
-        root.rewindDirectory();
-         break; 
-        } else {
-        root.rewindDirectory();
-        entry=root.openNextFile();
-        strcpy(longfilename,entry.name());
-        break;
-        }
-      //entry.close();
-        continue;      
-      }
+      if(!entry) break;
 
-        if(entry.isDirectory()) {   //handling subdirectory
-          strcpy(longfilename,entry.name());
-          if (strcmp(longfilename,"System Volume Information")==0) {
-           continue;
-         } else {
-           filefound=true;
-           break; 
-         }
-        }
+      if (entry.isDirectory()) continue;
 
-      for(i=0; i<46; i++) longfilename[i]=0; 
-      strcpy(longfilename,entry.name());
-      
-      dot=0;
-      for(i=0; i<43; i++) {
-        if (longfilename[i]=='.') {
-          dot=i;
-        }
-      }    
-      if(dot==0) 
-      {
-        continue; //dot not found, get next file
+      longfilename[0]=0; 
+      entry.getName(longfilename,45);
+
+      int dot = 0;
+      for (int i=0; longfilename[i]; i++) {
+        if (longfilename[i] == '.') dot = i;
       }
+      if(dot==0) continue; //dot not found, get next file
+
       suf[0]=0;
       //test du suffixe
       suf[0]=longfilename[dot+1];
@@ -201,71 +189,97 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
       suf[2]=longfilename[dot+3];
       suf[3]=0;
     
-      
-      if(strcmp(suf,"bin")!=0  && strcmp(suf,"BIN")!=0 )
-        continue; //not BIN file
+      if(strcmp(suf,"bin")!=0  && strcmp(suf,"BIN")!=0 ) continue; //not BIN file
       filefound=true;
     }
-      // .bin found
-      file_size = entry.size();
-      int kb=(file_size >>10); 
-       display.clearDisplay();
-      display.setTextSize(1);
-      display.setTextColor(1);
-      display.setCursor(0, 1);
-      display.print(longfilename);
-      display.setCursor(0,24);
-      if (entry.isDirectory()) {
-        display.print("DIR");
-      } else 
-      { display.print("KB:");
-      display.setCursor(22,24);
-      display.print(kb,DEC);
-      }
-      display.display();
+    if (filefound) {
+      rootpos[curid]=lastpos;
+      lastid= curid;
+      if (curid < ROOT_MAX_POS) curid++;
+    }
+
+  } while (filefound);
+
+  if (lastid == -1) {
+    Serial.println("Error no bin file");
+  }
+
+  curid = 0;
+  int speed = 0;
+  while (!selected)
+  {
+    root.seekSet(rootpos[curid]);
+    entry=root.openNextFile();
+    entry.getName(longfilename,45);
+    file_size = entry.size();
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(1);
+    display.setCursor(0, 1);
+    display.print(longfilename);
+    display.setCursor(0,24);
+    int kb=(file_size >>10);
+    display.print("KB:");
+    display.setCursor(22,24);
+    display.print(kb,DEC);
+    display.display();
     
-    filefound=false;
     //check user button and time
+    int b1press,b2press;
     while (1)
     {
-      //Next button
-      if (digitalRead(BT2_PIN)) {
-          digitalWriteFast(Status_PIN,HIGH);
-          delay(300);
-          digitalWriteFast(Status_PIN,LOW);
-          break; // readnext file
+      // Selection
+      b1press = digitalRead(BT1_PIN);
+      b2press = digitalRead(BT2_PIN);
+      if (speed > 10) delay(10);
+      else            delay(100);
+      if ( (b1press != digitalRead(BT1_PIN)) || 
+           (b2press != digitalRead(BT2_PIN)) ) {
+        delay(100);
+        speed = 0;
+        continue;
       }
 
-      //SELECT Button
-      if (digitalRead(BT1_PIN)) {
-          digitalWriteFast(Status_PIN,HIGH);
-          delay(300);
-          digitalWriteFast(Status_PIN,LOW);
-          if (entry.isDirectory()) {
-            root=SD.open(longfilename);
-            strcat(path,longfilename);
-            subfolder++;
-            break;
-          } else 
-          if (strcmp(longfilename,"..")==0) {
-            root=SD.open("/");
-            for(i=0;i<50;i++) path[i]=0;
-            subfolder--;
-            break;
-          } else {
-          selected=true;
-          break; // readnext file
-          }
-        }
-      } 
-    } //fin de la boucle de choix du fichier (on en sort si le fichier a ete choisi)
+      //Next button
+      if (b2press && !b1press) {
+        speed++;
+        digitalWriteFast(Status_PIN,HIGH);
+        if (speed > 10) delay(50);
+        else            delay(300);
+        digitalWriteFast(Status_PIN,LOW);
+        if (curid < lastid) curid++;
+        else                curid = 0;
+        break; // readnext file
+      } else
+      //Prev button
+      if (b1press && !b2press) {
+        speed++;
+        digitalWriteFast(Status_PIN,HIGH);
+        if (speed > 10) delay(50);
+        else            delay(300);
+        digitalWriteFast(Status_PIN,LOW);
+        if (curid >= 1) curid--;
+        else            curid = lastid;
+        break;
+      } else
+      if (b1press && b2press) {
+        digitalWriteFast(Status_PIN,HIGH);
+        delay(200);
+        digitalWriteFast(Status_PIN,LOW);
+        selected=true;
+        break; // readnext file
+      } else {
+        speed = 0;
+      }
+    } 
+  } //fin de la boucle de choix du fichier (on en sort si le fichier a ete choisi)
   //root.close();  //fermeture du repertoire de la carte SD
   //return file_return;
 }
 
-void setup() {
-
-
+void setup() 
+{
   long MUX = 21;
   IOMUXC_SW_MUX_CTL_PAD_GPIO_AD_B1_00 = MUX;  
   IOMUXC_SW_MUX_CTL_PAD_GPIO_AD_B1_01 = MUX;
@@ -321,12 +335,12 @@ void setup() {
   IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_05 = PAD;
   IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_06 = PAD;
 
-//  IOMUXC_GPR_GPR26 &=0xffff0000; not needed in teensy 4.1, it's default
+  // IOMUXC_GPR_GPR26 &=0xffff0000; not needed in teensy 4.1, it's default
 
-String riga;
-char tmphex[] {0,0,0,0,0,0};
-int linepos;
- //Serial.begin(115200);
+  String riga;
+  char tmphex[] {0,0,0,0,0,0};
+  int linepos;
+  //Serial.begin(115200);
   
   pinMode(Status_PIN, OUTPUT);
   pinMode(BT1_PIN,INPUT_PULLDOWN);
@@ -338,24 +352,22 @@ int linepos;
     ROM[i]=0;
   }
  
- for (long i=0; i<RAMSIZE; i++) {
+  for (long i=0; i<RAMSIZE; i++) {
     RAM[i]=0;
   }
   
   while (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS));
+
   display.clearDisplay();
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(1);
  
   display.setCursor(12, 1);
-  display.print("RTO Cart");
-  display.setTextSize(1);
-  display.setCursor(110,22);
-  display.print("1.0");
+  display.print("RTO 1.2 (Zx)");
   display.display();
-  delay(500); // Pause for 2 seconds
+  delay(1500); // Pause for 1.5 seconds
   
-  while (!SD.begin(chipSelect)) 
+  while (!sd.begin(SD_CONFIG)) 
   {
     display.clearDisplay();
     display.setCursor(0, 1);
@@ -366,29 +378,24 @@ int linepos;
   
   SelectBinFile();
   
-  for(int i=0; i<45; i++) {
-        if (longfilename[i]=='.') {
-          lenfilename= i;  //dot found
-        }
+  int posdot = 0;
+  for (int i=0; longfilename[i]; i++) {
+    if (longfilename[i] == '.') posdot = i;
   }
-  
-  memcpy(mapfilename,longfilename,lenfilename);
+  strncpy(mapfilename,longfilename,posdot);
   strcat(mapfilename,".cfg");
- 
-  strcat(path,"/");
-  strcat(path,mapfilename);
-  mapfile=SD.open(path);
-  //  mapfile=SD.open(mapfilename);
+  mapfile=sd.open(mapfilename);
+
   if (!mapfile) {
-    mapfile.openNextFile();
-    mapfile=SD.open("0.cfg");
-    }
+    mapfile=sd.open("0.cfg");
+  }
   if (!mapfile) {
     display.clearDisplay();
     display.setCursor(0, 1);
     display.print("Map CFG file error");
     display.setCursor(0,16);
-    display.print("restart RTO");
+    //display.print("restart RTO");
+    display.print(mapfilename);
     display.display();
     while(1);
   }
@@ -514,7 +521,7 @@ int linepos;
         while(1);
       } 
       romLen++;
-     } 
+    } 
     // close the file:
     entry.close();
   } else {
@@ -526,7 +533,7 @@ int linepos;
     display.print(longfilename);
     display.display();
     return; 
-     }
+  }
   
 }
 
@@ -539,9 +546,18 @@ void loop()
   unsigned int parallelBus, dataOut;
   unsigned char busBit;
   bool deviceAddress = false; 
-  unsigned int delRD=482;
-  unsigned int delWR=540;
+  //unsigned int delRD=482;
+  //unsigned int delWR=540;
+  //unsigned int delADAR=0;
+  //LUDO x 1.2
+  //unsigned int delRD=578;
+  //unsigned int delWR=648;
+  //unsigned int delADAR=0;
+  //LUDO x 1.3
+  unsigned int delRD=626;
+  unsigned int delWR=702;
   unsigned int delADAR=0;
+
   unsigned int curPage=0;
   unsigned int checkPage=0;
   
@@ -592,8 +608,7 @@ void loop()
     busState1 = (lastBusState >> 4) & 7; //if gpio9    
     busBit = busLookup[busState1];
     // Avoiding switch statements here because timing is critical and needs to be deterministic
-    if (!busBit)
-    {
+    if (!busBit) {
       // -----------------------
       // DTB
       // -----------------------
@@ -601,8 +616,7 @@ void loop()
       // DTB needs to come first since its timing is critical.  The CP-1600 expects data to be
       // placed on the bus early in the bus cycle (i.e. we need to get data on the bus quickly!)
  
-      if (deviceAddress)
-      {
+      if (deviceAddress) {
         // The data was prefetched during BAR/ADAR.  There isn't nearly enough time to fetch it here.
         // We can just output it.
                 
@@ -618,28 +632,24 @@ void loop()
         GPIO6_GDIR &= 0x0000FFFF; // to set pins to inputs (bit16-31)
         GPIO9_DR |= BUS_DIR_MASK;  // set bit 9 ->set dir to input (high)
       }
-    }
-    else
-    {
+
+    } else {
       busBit >>= 1;
-      if (!busBit)
-      {
+      if (!busBit) {
         // -----------------------
         // BAR, ADAR
         // -----------------------
-        if ((deviceAddress) and (busState1==BUS_ADAR)) 
-      {
-        // The data was prefetched during BAR/ADAR.  There isn't nearly enough time to fetch it here.
-        // We can just output it.
+        if ((deviceAddress) and (busState1==BUS_ADAR)) {
+          // The data was prefetched during BAR/ADAR.  There isn't nearly enough time to fetch it here.
+          // We can just output it.
                 
-        GPIO6_GDIR |= 0xFFFF0000; // to set pins to outputs (bit16-31)
-        // writing data (and preserve other pins data)
-        GPIO6_DR = (GPIO6_DR & 0x0000FFFF) | (dataOut << 16);
-         // latch
-        GPIO9_DR &= ~BUS_DIR_MASK;  // clr bit 9 ->set dir to output (low)
-        
-        delayNanoseconds(delWR);   // to tune ok a 360 / 380
-      }
+          GPIO6_GDIR |= 0xFFFF0000; // to set pins to outputs (bit16-31)
+          // writing data (and preserve other pins data)
+          GPIO6_DR = (GPIO6_DR & 0x0000FFFF) | (dataOut << 16);
+          // latch
+          GPIO9_DR &= ~BUS_DIR_MASK;  // clr bit 9 ->set dir to output (low)
+          delayNanoseconds(delWR);   // to tune ok a 360 / 380
+        }
         // Prefetch data here because there won't be enough time to get it during DTB.
         // However, we can't take forever because of all the time we had to wait for
         // the address to appear on the bus.
@@ -656,36 +666,32 @@ void loop()
         deviceAddress = false;
          
         for (int i=0; i < slot+1; i++) {
-            if ((parallelBus >= maprom[i]) && (parallelBus<=addrto[i])) {
-              if (tipo[i]==2) {
+          if ((parallelBus >= maprom[i]) && (parallelBus<=addrto[i])) {
+            if (tipo[i]==2) {
                 dataOut=RAM[parallelBus - ramfrom];
                 deviceAddress = true;
                 break;
-              }
-              if ((tipo[i]==1) && ((parallelBus & 0xfff)==0xfff)) {
+            }
+            if ((tipo[i]==1) && ((parallelBus & 0xfff)==0xfff)) {
                 checkPage=1;
                 deviceAddress = true;
                 break;
-              }
-              if ((page[i]==curPage) && (tipo[i]==1)) {
+            }
+            if ((page[i]==curPage) && (tipo[i]==1)) {
                 dataOut=ROM[(parallelBus - maprom[i]) + mapfrom[i]];
                 deviceAddress = true;
                 break;
-              }
-              if (tipo[i]==0) {
+            }
+            if (tipo[i]==0) {
                 dataOut=ROM[(parallelBus - maprom[i]) + mapfrom[i]];
                 deviceAddress = true;
                 break;
-              }
-            } 
-           
+            }
+          } 
         }
-      }
-      else
-      {
-         busBit >>= 1;
-        if (!busBit)
-        {
+      } else {
+        busBit >>= 1;
+        if (!busBit) {
           // -----------------------
           // DWS
           // -----------------------
@@ -696,25 +702,21 @@ void loop()
             unsigned int dataWrite = GPIO6_PSR >> 16;
             if (RAMused == 1) RAM[parallelBus-ramfrom]=dataWrite;
             if ((checkPage == 1) && (((dataWrite >> 4) & 0xff) == 0xA5)) {
-            //  if (checkPage == 1) {
-                curPage=dataWrite & 0xf;
+              curPage=dataWrite & 0xf;
               checkPage=0;
-             }
+            }
           }
-        }
-        else
-        {
+        } else {
          // -----------------------
          // NACT, IAB, DW, INTAK
          // -----------------------
          // reconnect to bus
           GPIO6_GDIR &= 0x0000FFFF; // to set pins to inputs (bit16-31)
           GPIO9_DR |= BUS_DIR_MASK;  // set bit 9 ->set dir to input (high)
-        
         }
       } 
     }
-   }
-  } 
+  }
+} 
     
   

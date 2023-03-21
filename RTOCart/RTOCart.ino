@@ -155,6 +155,8 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
   // Boucle de choix du fichier
   if (!(root=sd.open("/"))) {
     Serial.println("Error opening Root");
+    delay(1000);
+    reboot();
   }
 
   //First explore the entire directory
@@ -201,6 +203,8 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
 
   if (lastid == -1) {
     Serial.println("Error no bin file");
+    delay(1000);
+    reboot();
   }
 
   curid = 0;
@@ -492,6 +496,8 @@ void setup()
         }
      }
   }
+
+  mapfile.close();
      
   slot--;  // conservo il numero di slot!
   Serial.print("Slots:");Serial.println(slot);

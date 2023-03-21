@@ -363,7 +363,7 @@ void setup()
   display.setTextColor(1);
  
   display.setCursor(12, 1);
-  display.print("RTO 1.2 (Zx)");
+  display.print("RTO 1.2 Fr");
   display.display();
   delay(1500); // Pause for 1.5 seconds
   

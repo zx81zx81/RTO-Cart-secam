@@ -3,8 +3,9 @@ Multicart for Mattel Intellivision based on Teensy 4.1
 
 Fork repository of https://github.com/aotta/RTO-Cart
 The software is only compatible with the PCB v1.0
-Note: you need to manually ground the pin 8 in the cart's slot (video-ext input) on that version of the pcb.
-See here https://github.com/aotta/RTO-Cart/tree/main/old%20ver
+
+Warning: you need to manually ground the pin 8 in the cart's slot (video-ext input) on that version of the pcb.
+See here https://github.com/aotta/RTO-Cart/tree/main/old%20ver for more details.
 
 Few changes compared to original software v1.0 :
 - Fix timing to work on my French Intellivision version (Secam)

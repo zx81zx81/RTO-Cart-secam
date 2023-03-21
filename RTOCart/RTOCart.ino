@@ -31,7 +31,6 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire2, OLED_RESET);
 #include <SD.h>
 //#include <SdFat.h>
 
-
 // set up variables using the SD utility library functions:
 SdFs sd;
 FsFile root;
@@ -151,7 +150,7 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
   display.setCursor(0, 1);
   display.print("Reading card..");
   display.display();
-  //delay(1000);
+  delay(1000);
     
   // Boucle de choix du fichier
   if (!(root=sd.open("/"))) {
@@ -278,6 +277,15 @@ void SelectBinFile() // adapted from my SDLEP-TFT project  http://dcmoto.free.fr
   //return file_return;
 }
 
+#define CPU_RESTART_ADDR (uint32_t *)0xE000ED0C
+#define CPU_RESTART_VAL 0x5FA0004
+
+void reboot()
+{
+   digitalWriteFast(Status_PIN,LOW);
+   *(CPU_RESTART_ADDR) = CPU_RESTART_VAL;
+}
+
 void setup() 
 {
   long MUX = 21;
@@ -363,8 +371,10 @@ void setup()
   display.setTextColor(1);
  
   display.setCursor(12, 1);
-  display.print("RTO 1.2 Fr");
+  display.print("RTO 1.3 Fr");
   display.display();
+
+  digitalWriteFast(Status_PIN,LOW);
   delay(1500); // Pause for 1.5 seconds
   
   while (!sd.begin(SD_CONFIG)) 
@@ -397,7 +407,8 @@ void setup()
     //display.print("restart RTO");
     display.print(mapfilename);
     display.display();
-    while(1);
+    delay(5000);
+    reboot();
   }
 
   slot=0;
@@ -414,7 +425,8 @@ void setup()
           display.setCursor(0, 1);
           display.print("[mapping] not found");
           display.display();
-          while(1);
+          delay(5000);
+          reboot();
         }
       }
     
@@ -500,7 +512,8 @@ void setup()
           display.setCursor(0,16);
           display.print(longfilename);
           display.display();
-          while(1);
+          delay(5000);
+          reboot();
       }
   
     }
@@ -518,7 +531,8 @@ void setup()
         display.setCursor(0, 1);
         display.print("Verify file error!");
         display.display();
-        while(1);
+        delay(5000);
+        reboot();
       } 
       romLen++;
     } 
@@ -595,10 +609,16 @@ void loop()
   
   // Main loop   
   digitalWriteFast(Status_PIN,LOW);
+  delay(1000);
+
   while (true)
   {
-    // Wait for the bus state to change
+    if (digitalRead(BT1_PIN) && !digitalRead(BT2_PIN)) {
+       // Reset the board ! 
+       reboot();
+    }
   
+    // Wait for the bus state to change
     do
     {
     } while (!((GPIO9_PSR ^ lastBusState) & BUS_STATE_MASK));

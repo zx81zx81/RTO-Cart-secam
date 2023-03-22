@@ -13,6 +13,7 @@ Few changes compared to original software v1.0 :
 - Navigation menu with Up and Down buttons
 - Selection of the game while pressing Up and Down at the same time
 - Speed up the browsing when a button is pressed during 10 seconds
+- Reset the multicart while pressing Up button during cartridge emulation
 - Bug fixing
 
 Many thanks to Aotta for his incredible work.
